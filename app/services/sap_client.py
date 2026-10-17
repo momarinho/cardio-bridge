@@ -26,7 +26,7 @@ class SAPServiceLayerClient:
 
         # Cliente HTTP que gerencia cookies automaticamente
         self.client = httpx.Client(
-            timeout=settings.SAP_BUSINESS_ONE_TIMEOUT,
+            timeout=getattr(settings, "SAP_TIMEOUT_SECONDS", 30.0),
             verify=False,
         )
         self.cookies: Dict[str, str] = {}
