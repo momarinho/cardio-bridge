@@ -59,42 +59,54 @@ graph LR
   * **Requisições Repetidas (`HIT-PREVIOUS-TRANSACTION`):** Intercepta a chamada antes de bater no SAP B1 e devolve instantaneamente o mesmo `DocEntry` já gerado.
   * **Proteção contra Violação de Contrato (`409 Conflict`):** Se a mesma chave for enviada com um payload adulterado (ex: valor diferente), a API bloqueia a requisição.
 
-### B. Governança de Sessão na Service Layer (`B1SESSION`)
+### B. Governança de Sessão na Service Layer (`app/services/sap_client.py`)
 * Autenticação no endpoint `/b1s/v1/Login` da Service Layer exige gerenciamento inteligente de estado: fazer login a cada requisição esgota conexões e degrada a performance.
-* A arquitetura prevê o **reaproveitamento do cookie `B1SESSION` e `ROUTEID`** em memória/cache durante a janela de validade (padrão de 30 minutos do SAP), realizando *re-login* transparente apenas em caso de expiração (`401 Unauthorized`).
+* A arquitetura realiza o **reaproveitamento do cookie `B1SESSION` e `ROUTEID`** em memória durante a janela de validade (padrão de 30 minutos do SAP), executando *re-login* transparente em caso de expiração (`401 Unauthorized`).
 
-### C. Auditoria Ponta a Ponta e Staging do Legado (`app/models/`)
-* **`AuditLog` (`audit_logs`):** Registra método, endpoint, payload enviado, resposta recebida, status HTTP e tempo de execução em milissegundos para rastreabilidade junto à controladoria e fornecedores externos (ex: consultoria SAP).
-* **`LegacyStagingRecord` (`legacy_staging_records`):** Tabela desacoplada para o *Strangler Fig Pattern*, controlando o ciclo de vida da migração (`PENDING` $\rightarrow$ `PROCESSING` $\rightarrow$ `SYNCED` / `ERROR`) com contador de retentativas.
+### C. Auditoria Ponta a Ponta e Worker do Legado (`app/workers/strangler_worker.py`)
+* **`AuditLog` (`audit_logs`):** Registra método, endpoint, payload enviado, resposta recebida, status HTTP e tempo de execução em milissegundos para rastreabilidade junto à controladoria e fornecedores externos.
+* **`LegacyStagingRecord` (`legacy_staging_records`):** Tabela desacoplada para o *Strangler Fig Pattern*, controlando o ciclo de vida da migração (`PENDING` → `PROCESSING` → `SYNCED` / `ERROR`) com rollback transacional e contador de retentativas.
 
 ---
 
-## 🚀 4. Como Executar Localmente
+## 📂 4. Estrutura do Repositório
 
-```bash
-# 1. Ativar o ambiente virtual
-source .venv/bin/activate
-
-# 2. Subir o servidor FastAPI
-uvicorn app.main:app --reload
+```text
+cardio-bridge/
+├── app/
+│   ├── api/v1/endpoints/      # Rotas REST (/associados/sync, /eventos/inscricoes)
+│   ├── core/
+│   │   ├── idempotency.py     # Hash SHA-256 + Proteção 409 Conflict e Cache Hit
+│   │   └── database.py        # Sessão SQLAlchemy 2.0
+│   ├── models/                # Tabelas: idempotency_records, legacy_staging_records, audit_logs
+│   ├── schemas/               # Contratos Pydantic v2 (Validação estrita de CRM/UF/CPF)
+│   ├── services/
+│   │   └── sap_client.py      # Cliente HTTPX SAP Service Layer (B1SESSION + Retry 401)
+│   └── workers/
+│       └── strangler_worker.py# Worker de sincronização Legado Delphi -> SAP B1
+├── mock_sap/
+│   └── mock_server.py         # Emulador da SAP B1 Service Layer (/b1s/v1/Login, OCRD, ORDR)
+├── demo_entrevista.py         # Script de 1 comando demonstrando os 3 cenários ponta a ponta
+└── tests/                     # Testes automatizados (Pytest)
 ```
 
+---
+
+## 🚀 5. Como Executar a Demonstração Ponta a Ponta (1 Comando)
+
+```bash
+#Ativar o ambiente virtual e rodar a simulação completa (Idempotência + SAP B1 + Worker Delphi):
+./.venv/bin/python demo_entrevista.py
+```
+
+Ou para subir os servidores separadamente:
+```bash
+# Terminal 1: Mock SAP Business One Service Layer (Porta 50001)
+./.venv/bin/uvicorn mock_sap.mock_server:mock_sap_app --port 50001
+
+# Terminal 2: Gateway CardioBridge FastAPI (Porta 8000)
+./.venv/bin/uvicorn app.main:app --reload --port 8000
+```
 * **Documentação Interativa (Swagger UI):** `http://localhost:8000/docs`
 * **Health Check:** `http://localhost:8000/health`
 
-### Exemplo Prático: Testando a Trava de Idempotência
-```bash
-# Primeira chamada -> Status 201 (Header: X-Cache-Idempotency: MISS-NEW-TRANSACTION)
-# Segunda chamada idêntica -> Status 201 (Header: X-Cache-Idempotency: HIT-PREVIOUS-TRANSACTION, mesmo DocEntry)
-curl -i -X POST "http://localhost:8000/api/v1/eventos/inscricoes" \
-     -H "Content-Type: application/json" \
-     -H "Idempotency-Key: cong-sbc-2026-med-123456" \
-     -d '{
-       "crm": "123456",
-       "uf": "RJ",
-       "nome_medico": "Dr. Roberto Kalil",
-       "codigo_evento": "CONG-CARDIO-2026",
-       "valor": 850.00,
-       "forma_pagamento": "PIX"
-     }'
-```
