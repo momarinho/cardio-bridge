@@ -110,3 +110,15 @@ Ou para subir os servidores separadamente:
 * **Documentação Interativa (Swagger UI):** `http://localhost:8000/docs`
 * **Health Check:** `http://localhost:8000/health`
 
+---
+
+## 🗺️ 6. Roadmap de Evolução (Próximas Sprints para Escala Enterprise)
+
+Esta PoC foi desenhada com foco em pragmatismo e execução imediata (*Zero-Setup*). Para evolução em ambiente produtivo de missão crítica e alta concorrência (ex: abertura de lotes de inscrição do Congresso da SBC ou pico de vencimento de anuidades), o planejamento arquitetural prevê 4 sprints evolutivas:
+
+* **Sprint 1 — Cache Distribuído In-Memory (Redis):** Migrar o armazenamento das chaves de idempotência (`TTL 24h`) e do cookie `B1SESSION` do SAP para o **Redis**. Isso elimina consultas ao banco relacional a cada requisição HTTP e permite que múltiplas réplicas do Gateway compartilhem a mesma sessão do ERP em microssegundos.
+* **Sprint 2 — Mensageria Assíncrona e DLQ (RabbitMQ):** Substituir o *polling* na tabela `legacy_staging_records` por filas de eventos no **RabbitMQ** com *Dead Letter Queue (DLQ)* e *Exponential Backoff*, eliminando concorrência de leitura/escrita e riscos de lock escalation no SQL Server.
+* **Sprint 3 — Escalabilidade Horizontal do Worker (*Competing Consumers*):** Evoluir o worker do padrão Strangler para rodar múltiplas instâncias em paralelo consumindo eventos com travas distribuídas (ou `SELECT ... WITH (UPDLOCK, READPAST)` no SQL Server).
+* **Sprint 4 — Observabilidade e Telemetria (OpenTelemetry):** Desacoplar os registros de `audit_logs` do banco relacional para uma stack dedicada (**Prometheus + Grafana + Loki/Elasticsearch**), permitindo métricas de latência em tempo real da Service Layer do SAP e evitando crescimento descontrolado do banco transacional.
+
+
